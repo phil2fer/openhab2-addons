@@ -382,6 +382,9 @@ public class SqueezeBoxPlayerHandler extends BaseThingHandler implements Squeeze
      *         not an image.
      */
     private RawType downloadImage(String url) {
+        // if (StringUtils.isNotEmpty(url)) {
+        // return HttpUtil.downloadImage(url);
+        // }
         if (StringUtils.isNotEmpty(url)) {
             if (!IMAGE_CACHE.containsKey(url)) {
                 IMAGE_CACHE.put(url, () -> {

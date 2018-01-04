@@ -20,6 +20,7 @@ import java.net.Socket;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -29,6 +30,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+
+import javax.xml.bind.DatatypeConverter;
 
 import org.apache.commons.lang.StringUtils;
 import org.eclipse.smarthome.core.thing.Bridge;
@@ -511,7 +514,7 @@ public class SqueezeBoxServerHandler extends BaseBridgeHandler {
                     });
 
                     // tell the server we want to subscribe to player updates
-                    sendCommand(player.getMacAddress() + " status - 1 subscribe:10 tags:yagJlNK");
+                    sendCommand(player.getMacAddress() + " status - 1 subscribe:10 tags:yagJlNKc");
                 }
             }
         }
@@ -547,12 +550,46 @@ public class SqueezeBoxServerHandler extends BaseBridgeHandler {
             }
         }
 
-        private String fetchUrl(String messagePart, final String mac) {
+        /**
+         * Returns a hexadecimal encoded MD5 hash for the input String.
+         *
+         * @param data
+         * @return
+         */
+        private String getMD5Hash(String data) {
+            String result = null;
+            try {
+                MessageDigest digest = MessageDigest.getInstance("MD5");
+                byte[] hash = digest.digest(data.getBytes("UTF-8"));
+                return bytesToHex(hash); // make it printable
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+            return result;
+        }
+
+        /**
+         * Use javax.xml.bind.DatatypeConverter class in JDK to convert byte array
+         * to a hexadecimal string. Note that this generates hexadecimal in upper case.
+         *
+         * @param hash
+         * @return
+         */
+        private String bytesToHex(byte[] hash) {
+            return DatatypeConverter.printHexBinary(hash);
+        }
+
+        private String fetchUrlold(String messagePart, final String mac) {
             // default url for cover art. Works all the time except for some particular case
-            String url = "http://" + host + ":" + webport + "/music/current/cover.jpg?player=" + encode(mac);
+            if (messagePart == null) {
+                return "http://" + host + ":" + webport + "/music/current/cover.jpg?player=" + encode(mac);
+            }
+            String url = "http://" + host + ":" + webport + "/music/current/cover.jpg?player=" + encode(mac) + "&hash="
+                    + getMD5Hash(messagePart);
             // if messagePart start with "artwork_url:http://", default url works
             if (messagePart != null && messagePart.startsWith("artwork_url%3A")
-                    && !messagePart.startsWith("artwork_url%3Ahttp%3A%2F%2F")) {
+                    && !messagePart.startsWith("artwork_url%3Ahttp%3A%2F%2F")
+                    && !messagePart.startsWith("artwork_url%3Ahttps%3A%2F%2F")) {
                 url = messagePart.substring("artwork_url%3A".length());
                 // example of particular case.
                 // this web radio : http://broadcast.infomaniak.net/tsfjazz-high.mp3
@@ -564,6 +601,37 @@ public class SqueezeBoxServerHandler extends BaseBridgeHandler {
                 } else {
                     url = "http://" + host + ":" + webport + "/" + decode(url);
                 }
+            }
+            return url;
+        }
+
+        private String fetchUrl(String messagePart, final String mac) {
+            // default url for cover art. Works all the time except for some particular case
+            String url = "http://" + host + ":" + webport + "/music/current/cover.jpg?player=" + encode(mac);
+            // if messagePart start with "artwork_url:http://", default url works
+            if (messagePart != null && messagePart.startsWith("artwork_url%3A")) {
+                if (messagePart.startsWith("artwork_url%3Ahttp%3A%2F%2F")
+                        || messagePart.startsWith("artwork_url%3Ahttps%3A%2F%2F")) {
+                    // url = decode(messagePart.substring("artwork_url%3A".length()));
+                    url = "http://" + host + ":" + webport + "/music/current/cover.jpg?player=" + encode(mac) + "&hash="
+                            + getMD5Hash(messagePart);
+                } else {
+                    url = messagePart.substring("artwork_url%3A".length());
+                    // example of particular case.
+                    // this web radio : http://broadcast.infomaniak.net/tsfjazz-high.mp3
+                    // default url return error 404
+                    // messagePart = artwork_url%3Ahtml%2Fimages%2Fradio.png (artwork_url:html/images/radio.png)
+                    // working url : "http://" + host + ":" + webport + "/" + "html/images/radio.png";
+                    if (url.startsWith("%2F")) {
+                        url = "http://" + host + ":" + webport + decode(url);
+                    } else {
+                        url = "http://" + host + ":" + webport + "/" + decode(url);
+                    }
+                }
+            }
+            if (messagePart != null && messagePart.startsWith("coverid%3A")) {
+                url = "http://" + host + ":" + webport + "/music/"
+                        + decode(messagePart.substring("coverid%3A".length())) + "/cover.jpg";
             }
             return url;
         }
@@ -709,12 +777,16 @@ public class SqueezeBoxServerHandler extends BaseBridgeHandler {
                 // Parameter Artwork_url
                 else if (messagePart.startsWith("artwork_url%3A")) {
                     url = fetchUrl(messagePart, mac);
+                }
+                // Parameter coverid
+                else if (messagePart.startsWith("coverid%3A") && !messagePart.startsWith("coverid%3A-")) {
+                    url = fetchUrl(messagePart, mac);
                 } else {
                     // Added to be able to see additional status message types
                     logger.trace("Unhandled status message type '{}'", messagePart);
                 }
             }
-
+            logger.info("coverart url : '{}'", url);
             final String finalUrl = url;
             final String finalRemoteTitle = remoteTitle;
             final String finalArtist = artist;
