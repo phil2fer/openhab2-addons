@@ -515,6 +515,7 @@ public class SqueezeBoxServerHandler extends BaseBridgeHandler {
                     });
 
                     // tell the server we want to subscribe to player updates
+                    // The c tag must be always in last position for coverart work properly
                     sendCommand(player.getMacAddress() + " status - 1 subscribe:10 tags:yagJlNKc");
                 }
             }
@@ -588,42 +589,19 @@ public class SqueezeBoxServerHandler extends BaseBridgeHandler {
             return DatatypeConverter.printHexBinary(hash);
         }
 
-        private String fetchUrlold(String messagePart, final String mac) {
-            // default url for cover art. Works all the time except for some particular case
-            if (messagePart == null) {
-                return "http://" + host + ":" + webport + "/music/current/cover.jpg?player=" + encode(mac);
-            }
-            String url = "http://" + host + ":" + webport + "/music/current/cover.jpg?player=" + encode(mac) + "&hash="
-                    + getMD5Hash(messagePart);
-            // if messagePart start with "artwork_url:http://", default url works
-            if (messagePart != null && messagePart.startsWith("artwork_url%3A")
-                    && !messagePart.startsWith("artwork_url%3Ahttp%3A%2F%2F")
-                    && !messagePart.startsWith("artwork_url%3Ahttps%3A%2F%2F")) {
-                url = messagePart.substring("artwork_url%3A".length());
-                // example of particular case.
-                // this web radio : http://broadcast.infomaniak.net/tsfjazz-high.mp3
-                // default url return error 404
-                // messagePart = artwork_url%3Ahtml%2Fimages%2Fradio.png (artwork_url:html/images/radio.png)
-                // working url : "http://" + host + ":" + webport + "/" + "html/images/radio.png";
-                if (url.startsWith("%2F")) {
-                    url = "http://" + host + ":" + webport + decode(url);
-                } else {
-                    url = "http://" + host + ":" + webport + "/" + decode(url);
-                }
-            }
-            return url;
-        }
-
         private String fetchUrl(String messagePart, final String mac) {
             // default url for cover art. Works all the time except for some particular case
             String url = "http://" + host + ":" + webport + "/music/current/cover.jpg?player=" + encode(mac);
+            // return default url when no artwork_url and no coderid
+            if (messagePart == null) {
+                return url;
+            }
             // if messagePart start with "artwork_url:http://", default url works
-            if (messagePart != null && messagePart.startsWith("artwork_url%3A")) {
+            if (messagePart.startsWith("artwork_url%3A")) {
                 if (messagePart.startsWith("artwork_url%3Ahttp%3A%2F%2F")
                         || messagePart.startsWith("artwork_url%3Ahttps%3A%2F%2F")) {
-                    // url = decode(messagePart.substring("artwork_url%3A".length()));
-                    url = "http://" + host + ":" + webport + "/music/current/cover.jpg?player=" + encode(mac) + "&hash="
-                            + getMD5Hash(messagePart);
+                    // add hash parameter to prevent problem with image caching
+                    url = url + "&hash=" + getMD5Hash(messagePart);
                 } else {
                     url = messagePart.substring("artwork_url%3A".length());
                     // example of particular case.
@@ -638,7 +616,7 @@ public class SqueezeBoxServerHandler extends BaseBridgeHandler {
                     }
                 }
             }
-            if (messagePart != null && messagePart.startsWith("coverid%3A")) {
+            if (messagePart.startsWith("coverid%3A")) {
                 url = "http://" + host + ":" + webport + "/music/"
                         + decode(messagePart.substring("coverid%3A".length())) + "/cover.jpg";
             }
@@ -654,13 +632,17 @@ public class SqueezeBoxServerHandler extends BaseBridgeHandler {
 
             switch (action) {
                 case "volume":
-                    String value = messageParts[3];
-                    updatePlayer(new PlayerUpdateEvent() {
-                        @Override
-                        public void updateListener(SqueezeBoxPlayerEventListener listener) {
-                            listener.volumeChangeEvent(mac, Integer.parseInt(value));
-                        }
-                    });
+                    String value = decode(messageParts[3]);
+                    try {
+                        updatePlayer(new PlayerUpdateEvent() {
+                            @Override
+                            public void updateListener(SqueezeBoxPlayerEventListener listener) {
+                                listener.volumeChangeEvent(mac, Integer.parseInt(value));
+                            }
+                        });
+                    } catch (NumberFormatException e) {
+                        logger.debug("Failed to parse as integer value '{}'", value, e);
+                    }
                     break;
                 default:
                     logger.trace("Unhandled mixer message type '{}'", Arrays.toString(messageParts));
